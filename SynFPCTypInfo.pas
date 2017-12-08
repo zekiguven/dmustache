@@ -4,8 +4,8 @@ unit SynFPCTypInfo;
 {
     This file is part of Synopse mORMot framework.
 
-    Synopse mORMot framework. Copyright (C) 2016 Arnaud Bouchez
-      Synopse Informatique - http://synopse.info
+    Synopse mORMot framework. Copyright (C) 2017 Arnaud Bouchez
+      Synopse Informatique - https://synopse.info
 
   *** BEGIN LICENSE BLOCK *****
   Version: MPL 1.1/GPL 2.0/LGPL 2.1
@@ -23,7 +23,7 @@ unit SynFPCTypInfo;
 
   The Initial Developer of the Original Code is Alfred Glaenzer.
 
-  Portions created by the Initial Developer are Copyright (C) 2016
+  Portions created by the Initial Developer are Copyright (C) 2017
   the Initial Developer. All Rights Reserved.
 
   Contributor(s):
@@ -52,10 +52,7 @@ unit SynFPCTypInfo;
 
 interface
 
-{$MODE objfpc}
-{$MODESWITCH AdvancedRecords}
-{$inline on}
-{$h+}
+{$I Synopse.inc} // define HASINLINE USETYPEINFO CPU32 CPU64 OWNNORMTOUPPER
 
 uses
   SysUtils,
@@ -77,8 +74,12 @@ type
 
 function GetFPCEnumName(TypeInfo: PTypeInfo; Value: Integer): PShortString; inline;
 function GetFPCEnumValue(TypeInfo: PTypeInfo; const Name: string): Integer; inline;
+function AlignTypeData(p : Pointer) : Pointer;
 function GetFPCTypeData(TypeInfo: PTypeInfo): PTypeData; inline;
 function GetFPCPropInfo(AClass: TClass; const PropName: string): PPropInfo; inline;
+{$ifdef FPC_NEWRTTI}
+function GetFPCRecInitData(TypeData: Pointer): Pointer; inline;
+{$endif}
 
 
 implementation
@@ -101,7 +102,7 @@ begin
   sName := Name;
   PT := GetFPCTypeData(TypeInfo);
   Count := 0;
-  Result := -1;
+  result := -1;
 
   if TypeInfo^.Kind=tkBool then begin
     if CompareText(BooleanIdents[false],Name)=0 then
@@ -111,9 +112,9 @@ begin
   end else
   begin
     PS := @PT^.NameList;
-    while (Result=-1) and (PByte(PS)^<>0) do begin
+    while (result=-1) and (PByte(PS)^<>0) do begin
         if ShortCompareText(PS^, sName) = 0 then
-          Result := Count+PT^.MinValue;
+          result := Count+PT^.MinValue;
         PS := PShortString(pointer(PS)+PByte(PS)^+1);
         Inc(Count);
       end;
@@ -128,8 +129,8 @@ begin
   PT := GetFPCTypeData(TypeInfo);
   if TypeInfo^.Kind=tkBool then begin
     case Value of
-      0,1: Result := @BooleanIdents[Boolean(Value)];
-      else Result := @NULL_SHORTSTRING;
+      0,1: result := @BooleanIdents[Boolean(Value)];
+      else result := @NULL_SHORTSTRING;
     end;
   end else begin
     PS := @PT^.NameList;
@@ -138,61 +139,59 @@ begin
       PS := PShortString(pointer(PS)+PByte(PS)^+1);
       Dec(Value);
     end;
-    Result := PS;
+    result := PS;
   end;
+end;
+
+function AlignTypeData(p : Pointer) : Pointer;
+{$push}
+{$packrecords c}
+  type
+    TAlignCheck = record
+      b : byte;
+      q : qword;
+    end;
+{$pop}
+begin
+{$ifdef FPC_REQUIRES_PROPER_ALIGNMENT}
+{$ifdef VER3_0}
+  result := Pointer(align(p,SizeOf(Pointer)));
+{$else VER3_0}
+  result := Pointer(align(p,PtrInt(@TAlignCheck(nil^).q)))
+{$endif VER3_0}
+{$else FPC_REQUIRES_PROPER_ALIGNMENT}
+  result := p;
+{$endif FPC_REQUIRES_PROPER_ALIGNMENT}
 end;
 
 function GetFPCTypeData(TypeInfo: PTypeInfo): PTypeData;
 begin
-  result := PTypeData(AlignToPtr(PTypeData(pointer(TypeInfo)+2+PByte(pointer(TypeInfo)+1)^)));
+  result := PTypeData(AlignTypeData(PTypeData(pointer(TypeInfo)+2+PByte(pointer(TypeInfo)+1)^)));
 end;
 
 {$ifdef FPC_REQUIRES_PROPER_ALIGNMENT}
 
 function GetFPCAlignPtr(P: pointer): pointer;
 begin
-  inc(PtrUInt(P),PByte(pointer(P)+1)^-2);
-  result := AlignToPtr(P);
+  result := AlignTypeData(P+2+Length(PTypeInfo(P)^.Name));
+  Dec(PtrUInt(result),SizeOf(pointer));
 end;
 
 {$endif}
-
-{
-procedure getMethodList(aClass:TClass);
-Type PMethodEntry=^TMethodEntry;
-     TMethodEntry=packed record
-       size:Word;
-       Adr:pointer;
-       Name:Shortstring;
-     end;
-var mTable:ppointer;
-    ClassName:String;
-    MethodCount:PWord;
-    MethodEntry:PMethodEntry;
-    i:integer;
-begin
-  while aClass<>nil do
-  begin
-    mTable := pointer(integer(aClass)+vmtMethodTable);
-    if (mTable<>nil)and(mTable^<>nil) then
-    begin
-      MethodCount := mTable^;
-      MethodEntry := pointer(integer(MethodCount)+2);
-      ClassName := aClass.ClassName;
-      for i := 1 to MethodCount^ do
-      begin
-        writeln(MethodEntry^.Name);
-        MethodEntry := pointer(integer(MethodEntry)+MethodEntry^.size);
-      end;
-    end;
-    aClass := aClass.ClassParent;
-  end;
-end;
-}
 
 function GetFPCPropInfo(AClass: TClass; const PropName: string): PPropInfo;
 begin
   result := typinfo.GetPropInfo(AClass,PropName);
 end;
+
+{$ifdef FPC_NEWRTTI}
+function GetFPCRecInitData(TypeData: Pointer): Pointer;
+begin
+  if PTypeData(TypeData)^.RecInitInfo = nil then
+    result := TypeData
+  else
+    result := AlignTypeData(pointer(PTypeData(TypeData)^.RecInitData));
+end;
+{$endif}
 
 end.
